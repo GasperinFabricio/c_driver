@@ -6,9 +6,16 @@
 #include <linux/uaccess.h>       
 #include <linux/device.h>
 
-// Definição do pino físico mais seu offset
-#define IO_LED 21
-#define IO_OFFSET 512
+// Variáveis configuráveis via parâmetro (com valores padrão)
+static int gpio_pin = 21;
+static int gpio_offset = 512;
+
+// Macros que expõem as variáveis para o comando insmod
+module_param(gpio_pin, int, 0644);
+MODULE_PARM_DESC(gpio_pin, "Número do pino físico do GPIO (Padrão: 21)");
+
+module_param(gpio_offset, int, 0644);
+MODULE_PARM_DESC(gpio_offset, "Offset de virtualização do gpiochip (Padrão: 512)");
 
 static struct gpio_desc *led;
 
@@ -17,8 +24,7 @@ static dev_t dev_nr;
 static struct cdev my_cdev;
 static struct class *my_class;
 
-// Implementação de fops.
-
+// Implementação de fops
 static ssize_t my_read(struct file *f, char __user *u, size_t l, loff_t *o)
 {
     return 0;
@@ -53,20 +59,21 @@ static struct file_operations fops = {
 };
 
 // Inicialização
-
 static int __init my_init(void)
 {
     int status;
+    int pino_virtual = gpio_pin + gpio_offset;
 
-    led = gpio_to_desc(IO_LED + IO_OFFSET);
+    // Obtém o descritor usando a soma dinâmica
+    led = gpio_to_desc(pino_virtual);
     if (!led) {
-        printk("gpioctrl - Erro ao captar pino %d\n", IO_LED);
+        printk("gpioctrl - Erro ao captar pino virtual %d (Físico: %d)\n", pino_virtual, gpio_pin);
         return -ENODEV;
     }
 
     status = gpiod_direction_output(led, 0);
     if (status) {
-        printk("gpioctrl - Erro ao setar pino %d para output\n", IO_LED);
+        printk("gpioctrl - Erro ao setar pino %d para output\n", gpio_pin);
         return status;
     }
 
@@ -100,20 +107,17 @@ static int __init my_init(void)
 
     device_create(my_class, NULL, dev_nr, NULL, "gpio_tcc_dev");
 
-    printk("gpioctrl - Driver inicializado no pino %d. Escreva 1/0 para /dev/gpio_tcc_dev\n", IO_LED);
+    printk("gpioctrl - Driver inicializado no pino %d (Virtual: %d). Escreva 1/0 para /dev/gpio_tcc_dev\n", gpio_pin, pino_virtual);
     return 0;
 }
 
 // Saída
-
 static void __exit my_exit(void)
 {
-    // Desliga LED após retirada do módulo (via rmmod)
     if (led) {
         gpiod_set_value(led, 0);
     }
 
-    // Limpeza do driver
     device_destroy(my_class, dev_nr);
     class_destroy(my_class);
     cdev_del(&my_cdev);
